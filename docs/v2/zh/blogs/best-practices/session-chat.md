@@ -73,9 +73,21 @@ SSE 只观察已提交事件并触发视图更新。普通断线由 EventSource 
 
 ### 6. 查看执行细节
 
-点击时间线记录，查看对应的原生 SessionEvent，包括 turnId、executionRunId 和 payloadJson。可观察模型请求、模型片段、消息、工具交互和 checkpoint。
+点击时间线记录，查看对应的原生 SessionEvent，包括 turnId、executionRunId 和 payloadJson。可观察模型请求、模型片段、消息、工具交互和 checkpoint。时间线展示该会话的全部已提交记录，而不只是最近几条。
+
+点击“执行记录”标题旁的“导出 JSONL”，可将全部原生记录下载为每行一个 JSON 对象的 `{session}-events.jsonl` 文件。
 
 页面同时显示历史消息数与工作消息数。历史供界面和审计读取；工作上下文还可能包括系统消息或经过压缩的内容，因此两个计数不要求相等。
+
+### 7. 思维链的折叠与展开
+
+发送 `/think`。离线模型会同时输出一段思维链和正式回复；真实推理模型的思考内容也会以同样方式持久化。思维链渲染为消息内、回复正文之前的默认收起“思维链”折叠区，点击标题可展开或收起，展开状态在页面刷新渲染后保持。正文区域不再混入思维链文本。
+
+### 8. 发送图片和视频
+
+点击“＋ 图片 / 视频”，或直接把图片粘贴到输入框，最多添加 4 个、单个不超过 4 MB 的文件。浏览器把文件以 Base64 随文本一起提交，后端把它们写入同一个已提交的 `message/user` 事件中的 `image` / `video` 内容块。因此刷新或重启后媒体仍能完整重放，模型拿到的也是真实字节；离线演示模型会回报收到的图片和视频数量。
+
+附件属于持久日志：带媒体的会话会产生更大的 Workspace 和更大的快照响应。`spring.http.codecs.max-in-memory-size`（32 MB）提高了这类请求体所需的缓冲上限。
 
 ## 使用真实模型
 
@@ -87,7 +99,7 @@ export CHAT_MODEL=qwen-plus
 java -jar agentscope-examples/agents/agentscope-chat/target/agentscope-chat.jar
 ```
 
-真实模型下使用自然语言聊天，`/slow` 和 `/ask` 是离线模型的演示指令。要体验挂起，可以请模型先通过 ask_user 询问你的偏好。切回离线模式使用 `CHAT_MODEL=demo`。模型切换不改变日志位置；如需分开历史，可新建会话。
+真实模型下使用自然语言聊天，`/slow`、`/ask` 和 `/think` 是离线模型的演示指令。要体验挂起，可以请模型先通过 ask_user 询问你的偏好。切回离线模式使用 `CHAT_MODEL=demo`。模型切换不改变日志位置；如需分开历史，可新建会话。
 
 ## API 与代码阅读顺序
 
@@ -95,11 +107,12 @@ java -jar agentscope-examples/agents/agentscope-chat/target/agentscope-chat.jar
 | --- | --- |
 | 列出会话 | `GET /api/sessions` |
 | 快照、消息、待答请求与状态 | `GET /api/sessions/{session}` |
-| 提交新 turn | `POST /api/sessions/{session}/turns`，body 为 `{request_id,message}` |
-| 引导当前任务 | `POST /api/sessions/{session}/steer`，body 为 `{message}` |
-| 只补充材料 | `POST /api/sessions/{session}/inject`，body 为 `{message}` |
+| 提交新 turn | `POST /api/sessions/{session}/turns`，body 为 `{request_id,message}` 或 `{request_id,message,attachments:[{media_type,data}]}` |
+| 引导当前任务 | `POST /api/sessions/{session}/steer`，body 为 `{message}`，可附带 `attachments` |
+| 只补充材料 | `POST /api/sessions/{session}/inject`，body 为 `{message}`，可附带 `attachments` |
 | SSE 观察与续传 | `GET /api/sessions/{session}/stream?after={cursor}`，支持 Last-Event-ID |
 | 分页查看原生记录 | `GET /api/sessions/{session}/events?after={cursor}&limit=100` |
+| 导出全部原生记录（JSON Lines） | `GET /api/sessions/{session}/export` |
 | 提交外部结果并续跑 | `POST /api/sessions/{session}/answers`，body 为 `{request_id,output}` |
 | 合作式暂停 | `POST /api/sessions/{session}/interrupt`，body 为 `{run_id}` |
 | 从 checkpoint 续跑 | `POST /api/sessions/{session}/turns/{turn}/resume` |

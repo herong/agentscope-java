@@ -124,3 +124,4 @@ agentscope-service/.dev-stack/
 # Mintlify documentation dependencies and local preview
 /docs/node_modules/
 /docs/.mintlify/
+/agentscope-examples/agents/agentscope-chat/src/main/resources/dev.env

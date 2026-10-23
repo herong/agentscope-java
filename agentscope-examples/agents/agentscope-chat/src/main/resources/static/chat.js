@@ -10,6 +10,10 @@ let session = new URLSearchParams(location.search).get('session')
 let source, snapshot, cursor = 0, eventCursor = 0, trace = new Map(), pendingRun;
 let sessionIds = [], reloadTimer, refreshing = false, refreshAgain = false;
 let connectVersion = 0, selectionVersion = 0, connected = true;
+const MAX_MEDIA_FILES = 4, MAX_MEDIA_BYTES = 4 * 1024 * 1024;
+let attachments = [];
+// Re-renders rebuild message nodes every snapshot; remember which thinking sections stay open.
+const openThinking = new Set();
 const short = value => value ? value.slice(0, 8) : '—';
 const path = () => `/api/sessions/${encodeURIComponent(session)}`;
 
@@ -22,13 +26,94 @@ async function request(url, body) {
     return data;
 }
 function notice(error) { $('notice').textContent = error?.message || error || ''; }
+function syncSend() {
+    const busy = ['starting', 'running'].includes((pendingRun || snapshot?.turns.at(-1))?.status);
+    $('send').disabled = ($('input-mode').value === 'steer' && !busy)
+        || (!$('prompt').value.trim() && !attachments.length);
+}
+function renderAttachments() {
+    $('attach-hint').textContent = attachments.length
+        ? `已选 ${attachments.length} / ${MAX_MEDIA_FILES} 个附件` : '';
+    $('attachments').replaceChildren(...attachments.map((attachment, index) => {
+        const chip = document.createElement('div'); chip.className = 'attachment';
+        const preview = document.createElement(attachment.kind);
+        preview.src = attachment.preview;
+        if (attachment.kind === 'video') preview.muted = true;
+        const name = document.createElement('span'); name.textContent = attachment.file.name || attachment.kind;
+        const remove = document.createElement('button');
+        remove.type = 'button'; remove.textContent = '×'; remove.title = '移除';
+        remove.setAttribute('aria-label', `移除 ${name.textContent}`);
+        remove.onclick = () => {
+            URL.revokeObjectURL(attachment.preview);
+            attachments.splice(index, 1); renderAttachments(); syncSend();
+        };
+        chip.append(preview, name, remove);
+        return chip;
+    }));
+}
+function addFiles(files) {
+    notice('');
+    for (const file of files) {
+        const kind = file.type.startsWith('image/') ? 'img' : file.type.startsWith('video/') ? 'video' : '';
+        if (!kind) { notice('只能发送图片或视频文件'); continue; }
+        if (file.size > MAX_MEDIA_BYTES) { notice('单个图片或视频不能超过 4 MB'); continue; }
+        if (attachments.length >= MAX_MEDIA_FILES) { notice(`一次最多发送 ${MAX_MEDIA_FILES} 个图片或视频`); break; }
+        attachments.push({ file, kind, mediaType: file.type, preview: URL.createObjectURL(file) });
+    }
+    renderAttachments(); syncSend();
+}
+function clearAttachments() {
+    attachments.forEach(attachment => URL.revokeObjectURL(attachment.preview));
+    attachments = []; renderAttachments(); syncSend();
+}
+function readBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = String(reader.result);
+            resolve(result.slice(result.indexOf(',') + 1));
+        };
+        reader.onerror = () => reject(reader.error || new Error('无法读取所选文件'));
+        reader.readAsDataURL(file);
+    });
+}
+async function mediaPayload() {
+    return Promise.all(attachments.map(async attachment => ({
+        media_type: attachment.mediaType, data: await readBase64(attachment.file)
+    })));
+}
 function text(blocks) {
     return (blocks || []).map(block => {
         if (block.type === 'text') return block.text || '';
-        if (block.type === 'thinking') return block.thinking || '';
+        // Thinking lives in its own collapsible section; keep it out of the main text.
         if (block.type === 'tool_result') return text(block.output);
         return '';
     }).filter(Boolean).join('\n');
+}
+function thinkingText(blocks) {
+    return (blocks || [])
+        .map(block => block.type === 'thinking' ? block.thinking || '' : '')
+        .filter(Boolean).join('\n');
+}
+function addThinking(node, blocks, id) {
+    const value = thinkingText(blocks);
+    if (!value) return;
+    const details = document.createElement('details');
+    details.className = 'thinking';
+    if (openThinking.has(id)) details.open = true;
+    details.ontoggle = () => {
+        if (details.open) openThinking.add(id);
+        else openThinking.delete(id);
+    };
+    const summary = document.createElement('summary');
+    summary.textContent = '思维链';
+    details.append(summary);
+    const body = document.createElement('div');
+    body.className = 'thinking-body';
+    body.textContent = value;
+    details.append(body);
+    // Reasoning precedes the answer: insert right after the role label, before the reply text.
+    node.insertBefore(details, node.querySelector('.text') || null);
 }
 function bubble(role, value, className = role) {
     const node = document.createElement('article');
@@ -37,6 +122,24 @@ function bubble(role, value, className = role) {
     const content = document.createElement('div'); content.className = 'text'; content.textContent = value;
     node.append(label, content);
     return node;
+}
+function mediaNode(block) {
+    const source = block.source || {};
+    const src = source.type === 'base64' && source.data
+        ? `data:${source.media_type};base64,${source.data}` : source.url;
+    if (!src) return null;
+    const node = document.createElement(block.type === 'video' ? 'video' : 'img');
+    node.src = src;
+    if (block.type === 'video') node.controls = true;
+    else { node.alt = '图片'; node.loading = 'lazy'; }
+    return node;
+}
+function addMedia(node, blocks, value) {
+    const media = (blocks || []).filter(block => block.type === 'image' || block.type === 'video')
+        .map(mediaNode).filter(Boolean);
+    if (!media.length) return;
+    const box = document.createElement('div'); box.className = 'media';
+    box.append(...media); node.append(box);
 }
 function renderItem(item) {
     const state = labels[item.status] || item.status;
@@ -53,8 +156,12 @@ function renderItem(item) {
             progress.textContent = '执行进度\n' + text(item.progress); node.append(progress);
         }
     } else {
+        const value = text(item.content);
         node = bubble(item.status === 'completed' ? item.role : `${item.role} · ${state}`,
-            text(item.content), item.role);
+            value, item.role);
+        if (!value) node.querySelector('.text')?.remove();
+        addThinking(node, item.content, item.id);
+        addMedia(node, item.content, value);
     }
     node.dataset.itemId = item.id;
     node.dataset.status = item.status;
@@ -62,6 +169,7 @@ function renderItem(item) {
 }
 function render() {
     $('session-label').textContent = `session ${session}`;
+    $('export').href = `${path()}/export`;
     $('cursor').textContent = cursor;
     $('checkpoint').textContent = snapshot?.checkpointSeq || 0;
     $('counts').textContent = `${snapshot?.messages.length || 0} / ${snapshot?.workingMessages || 0}`;
@@ -74,7 +182,7 @@ function render() {
     $('interrupt').hidden = !busy;
     $('resume').hidden = busy || !latest || !['interrupted', 'failed', 'suspended'].includes(latest.status)
         || snapshot.pending.length > 0;
-    $('send').disabled = $('input-mode').value === 'steer' && !busy;
+    syncSend();
     $('queue').textContent = (snapshot?.tasks || []).filter(task => task.status === 'queued')
         .map(task => `排队任务 ${short(task.turnId)}`).join(' · ');
     const nodes = (snapshot?.items || []).map(renderItem);
@@ -83,7 +191,7 @@ function render() {
     const scrollTop = messages.scrollTop;
     messages.replaceChildren(...(nodes.length ? nodes : [bubble('', '发送一条消息，开始这段会话。', 'empty')]));
     messages.scrollTop = atBottom ? messages.scrollHeight : scrollTop;
-    $('trace').replaceChildren(...[...trace.values()].slice(-80).reverse().map(event => {
+    $('trace').replaceChildren(...[...trace.values()].reverse().map(event => {
         const li = document.createElement('li'), button = document.createElement('button');
         const seq = document.createElement('span'); seq.className = 'seq'; seq.textContent = event.seq;
         const type = document.createElement('span'); type.className = 'event'; type.textContent = event.type;
@@ -127,7 +235,6 @@ async function loadSnapshot() {
     if (seq < cursor) return;
     snapshot = data; cursor = seq;
     for (const event of data.trace) trace.set(event.seq, event);
-    trace = new Map([...trace].sort((a, b) => a[0] - b[0]).slice(-80));
     if (data.executionError) { pendingRun = undefined; notice(data.executionError); }
     render();
 }
@@ -164,7 +271,7 @@ async function connect() {
             const event = JSON.parse(message.data);
             if (event.seq <= eventCursor) return;
             eventCursor = event.seq;
-            trace.set(event.seq, event); trace = new Map([...trace].slice(-80));
+            trace.set(event.seq, event);
             scheduleSnapshot();
         } catch (error) { notice(error); }
     });
@@ -187,6 +294,8 @@ async function select(id) {
     source?.close(); source = undefined; selectionVersion++; connectVersion++;
     clearTimeout(reloadTimer); reloadTimer = undefined; refreshAgain = false;
     session = id; cursor = 0; eventCursor = 0; snapshot = undefined; pendingRun = undefined; trace.clear();
+    openThinking.clear();
+    clearAttachments();
     localStorage.setItem('session-chat.selected', session);
     history.replaceState(null, '', `?session=${encodeURIComponent(session)}`);
     notice(''); render(); await loadList(); await connect();
@@ -201,23 +310,48 @@ async function action(work) {
     } catch (error) { if (version === selectionVersion) notice(error); }
 }
 $('compose').onsubmit = async event => {
-    event.preventDefault(); const message = $('prompt').value.trim(); if (!message) return;
+    event.preventDefault();
+    const message = $('prompt').value.trim();
+    if (!message && !attachments.length) { notice('请输入消息，或选择图片 / 视频'); return; }
     const mode = $('input-mode').value;
+    let media;
+    try { media = await mediaPayload(); } catch (error) { notice(error); return; }
     if (mode !== 'submit') {
-        await action(async () => { const ack = await request(`${path()}/${mode}`, { message }); $('prompt').value = ''; return ack; });
+        await action(async () => {
+            const ack = await request(`${path()}/${mode}`, { message, attachments: media });
+            $('prompt').value = ''; clearAttachments(); return ack;
+        });
         return;
     }
     let saved;
     try { saved = JSON.parse(localStorage.getItem('session-chat.request')); } catch { /* No prior submission. */ }
-    const body = saved?.session === session && saved.message === message
-        ? saved : { session, request_id: crypto.randomUUID(), message };
-    localStorage.setItem('session-chat.request', JSON.stringify(body));
+    // Media is not stored in the browser; its signature is enough to detect a changed submission.
+    const signature = media.map(item => `${item.media_type}:${item.data.length}`).join(',');
+    const body = saved?.session === session && saved.message === message && saved.signature === signature
+        ? { session, request_id: saved.request_id, message, attachments: media }
+        : { session, request_id: crypto.randomUUID(), message, attachments: media };
+    localStorage.setItem('session-chat.request', JSON.stringify({
+        session, request_id: body.request_id, message, signature
+    }));
     await action(async () => {
         const ack = await request(`${path()}/turns`, body);
-        $('prompt').value = ''; localStorage.removeItem('session-chat.request'); return ack;
+        $('prompt').value = ''; clearAttachments(); localStorage.removeItem('session-chat.request'); return ack;
     });
 };
 $('input-mode').onchange = render;
+// Mouse clicks open the picker through the label's native for="media" activation;
+// this handler only adds keyboard support for the focusable label.
+$('pick-media').onkeydown = event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault(); $('media').click();
+    }
+};
+$('media').onchange = event => { addFiles([...event.target.files]); event.target.value = ''; };
+$('prompt').oninput = syncSend;
+$('prompt').onpaste = event => {
+    const files = [...(event.clipboardData?.files || [])];
+    if (files.length) { event.preventDefault(); addFiles(files); }
+};
 $('prompt').onkeydown = event => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
         event.preventDefault(); if (!$('send').disabled) $('compose').requestSubmit();
@@ -238,7 +372,9 @@ $('sessions').onchange = () => select($('sessions').value).catch(notice);
 $('interrupt').onclick = () => action(() => request(`${path()}/interrupt`, { run_id: (pendingRun || snapshot?.turns.at(-1)).runId }));
 $('resume').onclick = () => action(() => request(`${path()}/turns/${snapshot.turns.at(-1).turnId}/resume`, {}));
 $('close-detail').onclick = () => $('detail').close();
-for (const button of document.querySelectorAll('[data-prompt]')) button.onclick = () => { $('prompt').value = button.dataset.prompt; $('prompt').focus(); };
+// Programmatic value assignment fires no input event; sync the send button manually.
+for (const button of document.querySelectorAll('[data-prompt]'))
+    button.onclick = () => { $('prompt').value = button.dataset.prompt; $('prompt').focus(); syncSend(); };
 // Inbox acceptance can change the queue without advancing the execution-event cursor.
 setInterval(() => { if (connected && !document.hidden) scheduleSnapshot(); }, 2000);
 await select(session).catch(notice);

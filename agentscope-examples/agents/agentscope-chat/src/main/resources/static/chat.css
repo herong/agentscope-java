@@ -214,9 +214,75 @@ h1 {
 }
 #compose {
   display:flex;
+  flex-direction:column;
   gap:10px;
   border-top:1px solid #e3e8ee;
   padding-top:18px;
+}
+.compose-body {
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.compose-actions {
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.compose-actions .hint {
+  margin-left:auto;
+}
+/* A label[for=file-input] opens the picker natively, so the button works even without JS. */
+label.media-button {
+  cursor:pointer;
+  border:1px solid #d9dfe7;
+  background:white;
+  border-radius:8px;
+  padding:8px 12px;
+  color:inherit;
+}
+label.media-button:hover {
+  border-color:#568e83;
+  background:#f4faf8;
+}
+.attachments {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.attachments:empty {
+  display:none;
+}
+.attachment {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  max-width:100%;
+  padding:5px 8px;
+  border:1px solid #dfe5eb;
+  border-radius:8px;
+  background:#f8fafb;
+  font-size:12px;
+}
+.attachment img,.attachment video {
+  width:42px;
+  height:42px;
+  object-fit:cover;
+  border-radius:6px;
+}
+.attachment span {
+  max-width:160px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.attachment button {
+  border:0;
+  background:transparent;
+  padding:2px 4px;
+  font-size:15px;
+  line-height:1;
+  color:#8b95a2;
 }
 textarea {
   resize:vertical;
@@ -238,6 +304,23 @@ textarea {
 .history-heading span {
   font-size:11px;
   color:#718578;
+}
+.history-tools {
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.history-tools a.export {
+  font-size:11px;
+  color:#2f715d;
+  border:1px solid #c6ded4;
+  border-radius:8px;
+  padding:4px 9px;
+  text-decoration:none;
+  white-space:nowrap;
+}
+.history-tools a.export:hover {
+  background:#f2f9f5;
 }
 dl {
   background:white;
@@ -421,6 +504,50 @@ pre {
     max-height: 35vh;
     overflow: auto;
   }
+}
+.message .thinking {
+  margin-top:8px;
+  border:1px solid #dfe5eb;
+  border-radius:9px;
+  background:#f8fafb;
+  font-size:12px;
+}
+.message .thinking summary {
+  cursor:pointer;
+  padding:7px 12px;
+  color:#768392;
+  user-select:none;
+  list-style:none;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.message .thinking summary::before {
+  content:'▸';
+  font-size:10px;
+  transition:transform .15s ease;
+}
+.message .thinking[open] summary::before {
+  transform:rotate(90deg);
+}
+.message .thinking-body {
+  border-top:1px dashed #dfe5eb;
+  padding:9px 12px;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  color:#637384;
+}
+.message .media {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:8px;
+}
+.message .media img,.message .media video {
+  max-width:240px;
+  max-height:200px;
+  border:1px solid #dfe5eb;
+  border-radius:9px;
 }
 .tool-progress {
   margin-top: 10px;

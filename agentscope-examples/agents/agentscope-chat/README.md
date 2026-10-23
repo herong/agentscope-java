@@ -67,9 +67,21 @@ Steering requires an active task. Interruption or pending user input parks queue
 
 ### 6. Inspect execution
 
-Click a timeline row to inspect its native SessionEvent, including turnId, executionRunId and payloadJson. Observe model requests/chunks, messages, interactions and checkpoints.
+Click a timeline row to inspect its native SessionEvent, including turnId, executionRunId and payloadJson. Observe model requests/chunks, messages, interactions and checkpoints. The timeline shows every committed record of the session, not only recent entries.
+
+Click 导出 JSONL next to the 执行记录 heading to download the full native record set as one JSON object per line (`{session}-events.jsonl`).
 
 The page also shows historical and working-message counts. Working context can contain system messages or compacted history, so these counts need not match.
+
+### 7. Collapse and expand the chain of thought
+
+Send /think. The offline model emits a thinking block together with the final reply; real reasoning models persist their thinking content the same way. The chain of thought renders as a collapsed 思维链 section placed before the reply text — click its heading to expand or collapse, and the expanded state survives periodic view re-renders. Thinking text no longer mixes into the main reply area.
+
+### 8. Send images and videos
+
+Click ＋ 图片 / 视频, or paste an image into the composer, to attach up to four files of at most 4 MB each. The browser submits them as Base64 next to the text and the application stores them as `image`/`video` content blocks inside the same committed `message/user` event. Media therefore replays after a refresh or restart and the model receives the real bytes; the offline model reports how many images and videos it received.
+
+Attachments live in the durable log, so a conversation with media produces a larger Workspace and larger snapshot responses. `spring.http.codecs.max-in-memory-size` (32 MB) raises the request body buffer these submissions need.
 
 ## Use a real model
 
@@ -81,7 +93,7 @@ export CHAT_MODEL=qwen-plus
 java -jar agentscope-examples/agents/agentscope-chat/target/agentscope-chat.jar
 ```
 
-Chat naturally with the real model; /slow and /ask are offline demo commands. Ask the model to collect a preference through ask_user to exercise suspension. Set CHAT_MODEL=demo to switch back. Model selection does not change storage; start a new conversation if you want separate history.
+Chat naturally with the real model; /slow, /ask and /think are offline demo commands. Ask the model to collect a preference through ask_user to exercise suspension. Set CHAT_MODEL=demo to switch back. Model selection does not change storage; start a new conversation if you want separate history.
 
 ## API and reading the code
 
@@ -89,11 +101,12 @@ Chat naturally with the real model; /slow and /ask are offline demo commands. As
 | --- | --- |
 | List conversations | GET /api/sessions |
 | Snapshot, messages, pending requests and state | GET /api/sessions/{session} |
-| Submit a turn | POST /api/sessions/{session}/turns with `{request_id,message}` |
-| Guide the active task | POST /api/sessions/{session}/steer with `{message}` |
-| Inject reference material | POST /api/sessions/{session}/inject with `{message}` |
+| Submit a turn | POST /api/sessions/{session}/turns with `{request_id,message}` or `{request_id,message,attachments:[{media_type,data}]}` |
+| Guide the active task | POST /api/sessions/{session}/steer with `{message}`, optionally `attachments` |
+| Inject reference material | POST /api/sessions/{session}/inject with `{message}`, optionally `attachments` |
 | Observe/replay SSE | GET /api/sessions/{session}/stream?after={cursor}, supporting Last-Event-ID |
 | Read native records | GET /api/sessions/{session}/events?after={cursor}&limit=100 |
+| Export all native records as JSON Lines | GET /api/sessions/{session}/export |
 | Submit external output and continue | POST /api/sessions/{session}/answers with `{request_id,output}` |
 | Cooperative interruption | POST /api/sessions/{session}/interrupt with `{run_id}` |
 | Checkpoint continuation | POST /api/sessions/{session}/turns/{turn}/resume |

@@ -1,0 +1,12 @@
+{
+  "turn": 2,
+  "seq": 5,
+  "type": "turn/end",
+  "time": 1791803062506,
+  "data": "{\"turn\":2,\"reason\":{\"kind\":\"hosting/interrupt\",\"reason\":{\"kind\":\"csc_agent\"}}}",
+  "fromAgent": "OCIM",
+  "source": "VCA",
+  "sourceEventSeqs": [],
+  "sessionId": "58231046:6624701260",
+  "eventId": "4c8d2f5a-c264-4dd6-abf9-5f3321c6319a"
+}

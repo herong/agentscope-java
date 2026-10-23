@@ -17,11 +17,16 @@ package io.agentscope.examples.chat;
 
 import io.agentscope.core.util.JsonUtils;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -62,18 +67,38 @@ public class ChatController {
     }
 
     @PostMapping("/sessions/{id}/turns")
-    public Mono<String> submit(@PathVariable String id, @RequestBody Map<String, String> body) {
-        return json(() -> sessions.submit(id, body.get("request_id"), body.get("message")));
+    public Mono<String> submit(@PathVariable String id, @RequestBody Map<String, Object> body) {
+        return json(
+                () ->
+                        sessions.submit(
+                                id,
+                                (String) body.get("request_id"),
+                                (String) body.get("message"),
+                                attachments(body)));
     }
 
     @PostMapping("/sessions/{id}/steer")
-    public Mono<String> steer(@PathVariable String id, @RequestBody Map<String, String> body) {
-        return json(() -> sessions.steer(id, body.get("message")));
+    public Mono<String> steer(@PathVariable String id, @RequestBody Map<String, Object> body) {
+        return json(() -> sessions.steer(id, (String) body.get("message"), attachments(body)));
     }
 
     @PostMapping("/sessions/{id}/inject")
-    public Mono<String> inject(@PathVariable String id, @RequestBody Map<String, String> body) {
-        return json(() -> sessions.inject(id, body.get("message")));
+    public Mono<String> inject(@PathVariable String id, @RequestBody Map<String, Object> body) {
+        return json(() -> sessions.inject(id, (String) body.get("message"), attachments(body)));
+    }
+
+    /** Images and videos arrive as Base64 content blocks alongside the message text. */
+    private static List<ChatSessions.Attachment> attachments(Map<String, Object> body) {
+        if (!(body.get("attachments") instanceof List<?> values)) return List.of();
+        var attachments = new ArrayList<ChatSessions.Attachment>();
+        for (var value : values) {
+            if (!(value instanceof Map<?, ?> media))
+                throw new IllegalArgumentException("Each attachment must be an object");
+            attachments.add(
+                    new ChatSessions.Attachment(
+                            (String) media.get("media_type"), (String) media.get("data")));
+        }
+        return attachments;
     }
 
     @PostMapping("/sessions/{id}/turns/{turn}/resume")
@@ -97,6 +122,25 @@ public class ChatController {
             @RequestParam(required = false) String after,
             @RequestParam(defaultValue = "100") int limit) {
         return json(() -> sessions.events(id, ChatHistory.position(id, after), limit));
+    }
+
+    /** One native SessionEvent per line (JSON Lines) as an attachment download. */
+    @GetMapping(value = "/sessions/{id}/export", produces = "application/x-ndjson")
+    public Mono<ResponseEntity<String>> export(@PathVariable String id) {
+        return Mono.fromCallable(() -> sessions.export(id))
+                .subscribeOn(Schedulers.boundedElastic())
+                .map(
+                        body ->
+                                ResponseEntity.ok()
+                                        .header(
+                                                HttpHeaders.CONTENT_DISPOSITION,
+                                                ContentDisposition.attachment()
+                                                        .filename(id + "-events.jsonl")
+                                                        .build()
+                                                        .toString())
+                                        .contentType(
+                                                MediaType.parseMediaType("application/x-ndjson"))
+                                        .body(body));
     }
 
     @GetMapping(value = "/sessions/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
