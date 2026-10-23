@@ -103,10 +103,7 @@ final class ChatHistory {
                 SessionInteractions.pending(prefix).values().stream()
                         .map(ChatHistory::frame)
                         .toList(),
-                facts.stream()
-                        .skip(Math.max(0, facts.size() - 80))
-                        .map(ChatHistory::frame)
-                        .toList(),
+                facts.stream().map(ChatHistory::frame).toList(),
                 checkpoint,
                 state == null ? 0 : state.getContext().size(),
                 projection.uncertainToolCalls(),

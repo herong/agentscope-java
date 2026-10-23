@@ -21,7 +21,9 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.agentscope.core.message.ImageBlock;
 import io.agentscope.core.message.ToolResultBlock;
+import io.agentscope.core.message.VideoBlock;
 import io.agentscope.core.util.JsonUtils;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -262,6 +264,98 @@ class ChatSessionsTest {
             assertEquals(
                     JsonUtils.getJsonCodec().toJson(completed.items()),
                     JsonUtils.getJsonCodec().toJson(restored.items()));
+        }
+    }
+
+    @Test
+    void imageAndVideoAttachmentsBecomeContentBlocksAndReachTheModel() throws Exception {
+        try (var sessions = new ChatSessions(workspace, new DemoChatModel())) {
+            sessions.submit(
+                    "conversation",
+                    "turn-media",
+                    "",
+                    List.of(
+                            new ChatSessions.Attachment("image/png", "iVBORw0KGgo="),
+                            new ChatSessions.Attachment("video/mp4", "AAAAIGZ0eXA=")));
+            var completed = await(sessions, s -> lastStatus(s).equals("completed"));
+            var user =
+                    completed.items().stream()
+                            .filter(item -> item.role().equals("user"))
+                            .findFirst()
+                            .orElseThrow();
+            assertEquals(1, user.content().stream().filter(ImageBlock.class::isInstance).count());
+            assertEquals(1, user.content().stream().filter(VideoBlock.class::isInstance).count());
+            assertTrue(
+                    completed
+                            .messages()
+                            .get(completed.messages().size() - 1)
+                            .getTextContent()
+                            .contains("1 张图片和 1 段视频"));
+        }
+    }
+
+    @Test
+    void attachmentsWithoutContentOrWithUnsupportedTypesAreRejected() {
+        try (var sessions = new ChatSessions(workspace, new DemoChatModel())) {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> sessions.submit("conversation", "empty", "  ", List.of()));
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () ->
+                            sessions.submit(
+                                    "conversation",
+                                    "audio",
+                                    "",
+                                    List.of(new ChatSessions.Attachment("audio/mpeg", "AAAA"))));
+        }
+    }
+
+    @Test
+    void traceShowsEveryCommittedRecordAndExportMatchesTheLog() throws Exception {
+        try (var sessions = new ChatSessions(workspace, new DemoChatModel())) {
+            sessions.submit("conversation", "turn-one", "remember this");
+            var completed = await(sessions, s -> lastStatus(s).equals("completed"));
+            var log = sessions.session("conversation").log();
+            long total = log.head().seq();
+            assertTrue(total > 0, "expected committed events");
+            // The snapshot trace covers the whole committed prefix, not only recent entries.
+            assertEquals(total, completed.trace().size());
+            assertEquals(1, completed.trace().get(0).seq());
+            assertEquals(total, completed.trace().get(completed.trace().size() - 1).seq());
+            // Export returns one parseable JSON object per committed event.
+            String jsonl = sessions.export("conversation");
+            String[] lines = jsonl.split("\n");
+            assertEquals(total, lines.length);
+            for (int i = 0; i < lines.length; i++) {
+                var event =
+                        JsonUtils.getJsonCodec()
+                                .fromJson(lines[i], io.agentscope.core.session.SessionEvent.class);
+                assertEquals(i + 1, event.seq());
+            }
+        }
+    }
+
+    @Test
+    void thinkingBlocksArePersistedAndReadableFromHistory() throws Exception {
+        try (var sessions = new ChatSessions(workspace, new DemoChatModel())) {
+            sessions.submit("conversation", "turn-think", "/think");
+            var completed = await(sessions, s -> lastStatus(s).equals("completed"));
+            var assistant =
+                    completed.items().stream()
+                            .filter(item -> item.role().equals("assistant"))
+                            .findFirst()
+                            .orElseThrow();
+            assertEquals(
+                    1,
+                    assistant.content().stream()
+                            .filter(io.agentscope.core.message.ThinkingBlock.class::isInstance)
+                            .count());
+            assertEquals(
+                    1,
+                    assistant.content().stream()
+                            .filter(io.agentscope.core.message.TextBlock.class::isInstance)
+                            .count());
         }
     }
 

@@ -17,13 +17,18 @@ package io.agentscope.examples.chat;
 
 import io.agentscope.core.model.Model;
 import io.agentscope.extensions.model.dashscope.DashScopeChatModel;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+
+import io.agentscope.extensions.model.openai.OpenAIChatModel;
+import io.agentscope.spring.boot.openai.OpenAIChatModelBuilderCustomizer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.annotation.Order;
 
 @SpringBootApplication
 public class ChatApplication {
@@ -32,21 +37,17 @@ public class ChatApplication {
     }
 
     @Bean(destroyMethod = "close")
-    ChatSessions sessions(
-            @Value("${chat.workspace}") String workspace,
-            @Value("${chat.model}") String modelName,
-            @Value("${chat.api-key}") String key)
-            throws IOException {
+    ChatSessions sessions(@Value("${chat.workspace}") String workspace,
+                          @Value("${chat.baseUrl}") String baseUrl,
+                          @Value("${chat.model}") String modelName,
+                          @Value("${chat.api-key}") String key) throws IOException {
         Model model;
         if ("demo".equals(modelName)) model = new DemoChatModel();
         else {
-            if (key.isBlank())
-                throw new IllegalArgumentException(
-                        "DASHSCOPE_API_KEY is required for a real model");
-            model =
-                    DashScopeChatModel.builder().apiKey(key).modelName(modelName).stream(true)
-                            .build();
+            if (key.isBlank()) throw new IllegalArgumentException("DASHSCOPE_API_KEY is required for a real model");
+            model = OpenAIChatModel.builder().baseUrl(baseUrl).apiKey(key).modelName(modelName).stream(true).build();
         }
         return new ChatSessions(Files.createDirectories(Path.of(workspace)), model);
     }
+
 }

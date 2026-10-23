@@ -16,11 +16,14 @@
 package io.agentscope.examples.chat;
 
 import io.agentscope.core.message.ContentBlock;
+import io.agentscope.core.message.ImageBlock;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.ThinkingBlock;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.message.ToolUseBlock;
+import io.agentscope.core.message.VideoBlock;
 import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
@@ -65,6 +68,7 @@ final class DemoChatModel implements Model {
         if (prompt.startsWith("/slow"))
             return workflow(messages.subList(taskStart, messages.size()));
         Msg last = messages.get(messages.size() - 1);
+        if (prompt.startsWith("/think")) return thinking();
         String reply;
         if (!last.getContentBlocks(ToolResultBlock.class).isEmpty()) {
             reply =
@@ -105,9 +109,38 @@ final class DemoChatModel implements Model {
                             + "」。你刚才说：「"
                             + prompt
                             + "」。"
+                            + media(last)
                             + "你可以刷新页面、断开事件连接，或重启服务后继续聊天。";
         }
         return text(reply, UUID.randomUUID().toString(), Duration.ofMillis(12));
+    }
+
+    private Flux<ChatResponse> thinking() {
+        return Flux.just(
+                ChatResponse.builder()
+                        .content(
+                                List.of(
+                                        ThinkingBlock.builder()
+                                                .thinking(
+                                                        "用户想看思维链的展示效果。\n"
+                                                                + "先确认这是离线演示：不需要真正推理。\n"
+                                                                + "计划：先给出这段思考，再给一条正式回复，前端会把思考折叠起来。")
+                                                .build(),
+                                        TextBlock.builder()
+                                                .text(
+                                                        "这是一条带思维链的离线演示回复。上方“思维链”区域可以点击展开和收起；"
+                                                                + "真实模型的推理内容也会出现在同一位置。")
+                                                .build()))
+                        .finishReason("stop")
+                        .build());
+    }
+
+    private String media(Msg message) {
+        int images = message.getContentBlocks(ImageBlock.class).size();
+        int videos = message.getContentBlocks(VideoBlock.class).size();
+        return images + videos == 0
+                ? ""
+                : "本轮还收到 " + images + " 张图片和 " + videos + " 段视频，它们已作为多模态内容块写入会话历史。";
     }
 
     private Flux<ChatResponse> workflow(List<Msg> messages) {
